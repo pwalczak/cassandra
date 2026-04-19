@@ -214,6 +214,65 @@ public class TableMetricsTest
     }
 
     @Test
+    public void testRowsMutatedCounter()
+    {
+        ColumnFamilyStore cfs = recreateTable();
+        assertEquals(0, cfs.metric.rowsMutated.getCount());
+
+        // Each INSERT touches exactly one row
+        session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (1, 'a', 'b')", KEYSPACE, TABLE));
+        assertEquals(1, cfs.metric.rowsMutated.getCount());
+
+        session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (2, 'c', 'd')", KEYSPACE, TABLE));
+        assertEquals(2, cfs.metric.rowsMutated.getCount());
+
+        // Batch of 3 rows — counter should jump by 3
+        executeBatch(false, 3, 1);
+        assertEquals(5, cfs.metric.rowsMutated.getCount());
+
+        assertRowsContains(cluster, session.execute("SELECT * FROM system_metrics.table_group"),
+                           row("org.apache.cassandra.metrics.Table.RowsMutated.junit.tablemetricstest",
+                               "junit.tablemetricstest",
+                               "counter",
+                               String.valueOf(cfs.metric.rowsMutated.getCount())));
+        assertRowsContains(cluster, session.execute("SELECT * FROM system_metrics.column_family_group"),
+                           row("org.apache.cassandra.metrics.ColumnFamily.RowsMutated.junit.tablemetricstest",
+                               "junit.tablemetricstest",
+                               "counter",
+                               String.valueOf(cfs.metric.rowsMutated.getCount())));
+    }
+
+    @Test
+    public void testRowsReadCounter()
+    {
+        ColumnFamilyStore cfs = recreateTable();
+        assertEquals(0, cfs.metric.rowsRead.getCount());
+
+        // Seed some rows
+        for (int i = 0; i < 5; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, 'v%d', 'x')", KEYSPACE, TABLE, i, i));
+
+        // Full-table scan should touch all 5 rows
+        session.execute(String.format("SELECT * FROM %s.%s", KEYSPACE, TABLE));
+        assertEquals(5, cfs.metric.rowsRead.getCount());
+
+        // Single-partition read touches 1 row
+        session.execute(String.format("SELECT * FROM %s.%s WHERE id = 0", KEYSPACE, TABLE));
+        assertEquals(6, cfs.metric.rowsRead.getCount());
+
+        assertRowsContains(cluster, session.execute("SELECT * FROM system_metrics.table_group"),
+                           row("org.apache.cassandra.metrics.Table.RowsRead.junit.tablemetricstest",
+                               "junit.tablemetricstest",
+                               "counter",
+                               String.valueOf(cfs.metric.rowsRead.getCount())));
+        assertRowsContains(cluster, session.execute("SELECT * FROM system_metrics.column_family_group"),
+                           row("org.apache.cassandra.metrics.ColumnFamily.RowsRead.junit.tablemetricstest",
+                               "junit.tablemetricstest",
+                               "counter",
+                               String.valueOf(cfs.metric.rowsRead.getCount())));
+    }
+    
+    @Test
     public void testLoggedPartitionsPerBatch()
     {
         ColumnFamilyStore cfs = recreateTable();
